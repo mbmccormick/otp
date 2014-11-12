@@ -5,9 +5,9 @@
     using System.Diagnostics.Contracts;
     using System.Globalization;
     using System.Linq;
-    using System.Security.Cryptography;
-    using System.Text;
-    using System.Web;
+    using System.Net;
+    using System.Runtime.InteropServices.WindowsRuntime;
+    using Windows.Security.Cryptography.Core;
 
     using Albireo.Base32;
 
@@ -29,16 +29,33 @@
             Contract.Ensures(Contract.Result<int>() > 0);
             Contract.Ensures(Contract.Result<int>() < Math.Pow(10, digits));
 
-            var generator = HMAC.Create(algorithm.ToAlgorithmName());
+            MacAlgorithmProvider algorithmProvider;
+            
+            switch (algorithm)
+            {
+                case HashAlgorithm.Md5:
+                    algorithmProvider = MacAlgorithmProvider.OpenAlgorithm(MacAlgorithmNames.HmacMd5);
+                    break;
+                case HashAlgorithm.Sha1:
+                    algorithmProvider = MacAlgorithmProvider.OpenAlgorithm(MacAlgorithmNames.HmacSha1);
+                    break;
+                case HashAlgorithm.Sha256:
+                    algorithmProvider = MacAlgorithmProvider.OpenAlgorithm(MacAlgorithmNames.HmacSha256);
+                    break;
+                case HashAlgorithm.Sha512:
+                    algorithmProvider = MacAlgorithmProvider.OpenAlgorithm(MacAlgorithmNames.HmacSha512);
+                    break;
+                default:
+                    throw new NotSupportedException();
+            }
 
-            generator.Key = Encoding.ASCII.GetBytes(secret);
-            generator.ComputeHash(CounterToBytes(counter));
+            byte[] bytes = new byte[secret.Length * sizeof(char)];
+            System.Buffer.BlockCopy(secret.ToCharArray(), 0, bytes, 0, bytes.Length);
 
-            var hmac =
-                generator
-                .Hash
-                .Select(b => Convert.ToInt32(b))
-                .ToArray();
+            var hash = algorithmProvider.CreateHash(bytes.AsBuffer());
+            hash.Append(CounterToBytes(counter).AsBuffer());
+
+            var hmac = hash.GetValueAndReset().ToArray().Select(b => Convert.ToInt32(b)).ToArray();
 
             var offset = hmac[19] & 0xF;
 
@@ -48,7 +65,7 @@
                 | (hmac[offset + 2] & 0xFF) << 8
                 | (hmac[offset + 3] & 0xFF);
 
-            return code % (int) Math.Pow(10, digits);
+            return code % (int)Math.Pow(10, digits);
         }
 
         internal static string GetKeyUri(
@@ -81,10 +98,10 @@
                     CultureInfo.InvariantCulture,
                     "otpauth://{0}/{1}:{2}?secret={3}&issuer={4}&algorithm={5}&digits={6}&counter={7}&period={8}",
                     type.ToKeyUriValue(),
-                    HttpUtility.UrlEncode(issuer),
-                    HttpUtility.UrlEncode(account),
+                    WebUtility.UrlEncode(issuer),
+                    WebUtility.UrlEncode(account),
                     Base32.Encode(secret),
-                    HttpUtility.UrlEncode(issuer),
+                    WebUtility.UrlEncode(issuer),
                     algorithm.ToKeyUriValue(),
                     digits,
                     counter,
@@ -100,7 +117,7 @@
 
             while (counter != 0)
             {
-                result.Add((byte) (counter & 0xFF));
+                result.Add((byte)(counter & 0xFF));
                 counter >>= 8;
             }
 
